@@ -96,26 +96,19 @@ class FileSum(Plugin):
         context = e_context["context"]
         msg: ChatMessage = e_context["context"]["msg"]
         
-        # 修改缓存键的生成方式，并添加更多日志
+        # 生成缓存键
         chat_id = context.get("session_id", "default")
-        logger.info(f"[FileSum] 原始 chat_id: {chat_id}")
-        
         user_id = msg.from_user_id
-        logger.info(f"[FileSum] 原始 user_id: {user_id}")
         
         # 清理ID中的特殊字符
         chat_id = chat_id.replace('@', '').split('_')[0]
         user_id = user_id.replace('@', '').split('_')[0]
         
-        logger.info(f"[FileSum] 处理后 chat_id: {chat_id}")
-        logger.info(f"[FileSum] 处理后 user_id: {user_id}")
-        
-        isgroup = e_context["context"].get("isgroup", False)
-        
         # 生成缓存key
         cache_key = f"filesum_{chat_id}_{user_id}"
-        logger.info(f"[FileSum] 生成缓存键: {cache_key}")
 
+        isgroup = e_context["context"].get("isgroup", False)
+        
         if isgroup and not self.group:
             logger.info("[FileSum] 群聊消息，文件处理功能已禁用")
             return
@@ -130,7 +123,6 @@ class FileSum(Plugin):
                 'file_path': file_path,
                 'processed': False
             }
-            logger.info(f"[FileSum] 文件路径已缓存: {file_path}")
 
             # 如果是单聊，直接触发总结
             if not isgroup:
@@ -208,14 +200,7 @@ class FileSum(Plugin):
                 'file_content': file_content,
                 'processed': True
             }
-            logger.info(f"[FileSum] 文件内容已缓存，cache_key={cache_key}")
-            logger.info(f"[FileSum] 缓存内容长度: {len(file_content)}")
-            
-            # 验证缓存是否成功
-            if cache_key in self.content_cache:
-                logger.info("[FileSum] 验证：缓存写入成功")
-            else:
-                logger.error("[FileSum] 验证：缓存写入失败")
+            logger.info(f"[FileSum] 文件内容已缓存，key={cache_key}")
             
         except Exception as e:
             logger.error(f"[FileSum] 缓存文件内容时出错: {str(e)}")
@@ -378,7 +363,7 @@ class FileSum(Plugin):
                 logger.warning(f"文件内容已截断到 {self.max_token_size} 个字符")
 
             # 简化prompt获取逻辑
-            prompt = self.prompt  # 直接使用默认prompt，移除params_cache相关逻��
+            prompt = self.prompt  # 直接使用默认prompt，移除params_cache相关逻辑
 
             # 构建提示词
             messages = [
