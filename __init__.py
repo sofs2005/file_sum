@@ -1,1 +1,1 @@
-from .sum4all import *
+from .file_sum import *
