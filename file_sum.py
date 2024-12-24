@@ -1,95 +1,94 @@
+# encoding:utf-8
 import json
 import os
 import csv
 import re
 import requests
 import plugins
+from bridge.context import ContextType, EventContext
 from bridge.reply import Reply, ReplyType
-from bridge.context import ContextType
-from channel.chat_message import ChatMessage
 from common.log import logger
-from common.expired_dict import ExpiredDict
+from plugins import *
 from docx import Document
 from bs4 import BeautifulSoup
 from pptx import Presentation
 from openpyxl import load_workbook
 import fitz  # PyMuPDF
 
-# 文件类型映射
+# 文件扩展名到类型的映射
 EXTENSION_TO_TYPE = {
     'pdf': 'pdf',
-    'doc': 'docx', 'docx': 'docx',
+    'docx': 'docx',
+    'doc': 'docx',
     'md': 'md',
+    'markdown': 'md',
     'txt': 'txt',
-    'xls': 'excel', 'xlsx': 'excel',
+    'xlsx': 'excel',
+    'xls': 'excel',
     'csv': 'csv',
-    'html': 'html', 'htm': 'html',
-    'ppt': 'ppt', 'pptx': 'ppt'
+    'html': 'html',
+    'htm': 'html',
+    'pptx': 'ppt',
+    'ppt': 'ppt'
 }
 
 @plugins.register(
-    name="filesum",
+    name="FileSum",
     desire_priority=2,
+    hidden=False,
     desc="A plugin for summarizing files",
     version="1.0.0",
     author="sofs2005",
 )
-
-class filesum(Plugin):
+class FileSum(Plugin):
     def __init__(self):
         super().__init__()
         try:
-            curdir = os.path.dirname(__file__)
-            config_path = os.path.join(curdir, "config.json")
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    self.config = json.load(f)
-            else:
-                self.config = super().load_config()
-                if not self.config:
-                    raise Exception("config.json not found")
-                    
+            # 加载配置
+            self.config = super().load_config()
+            if not self.config:
+                self.config = self._load_config_template()
+            
+            # 初始化配置
+            self.open_ai_api_key = self.config.get("open_ai_api_key", "")
+            self.open_ai_api_base = self.config.get("open_ai_api_base", "https://api.openai.com/v1")
+            self.model = self.config.get("model", "gpt-3.5-turbo")
+            self.enabled = self.config.get("enabled", True)
+            self.max_file_size = self.config.get("max_file_size", 15000)
+            self.max_token_size = self.config.get("max_token_size", 4000)
+            self.group = self.config.get("group", True)
+            self.qa_prefix = self.config.get("qa_prefix", "问")
+            self.prompt = self.config.get("prompt", "请总结这个文件的主要内容")
+            
+            # 初始化缓存
+            self.file_cache = ExpiredDict(self.config.get("file_cache_time", 60))
+            self.content_cache = ExpiredDict(self.config.get("content_cache_time", 300))
+            
+            # 注册事件处理器
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
             
-            # API配置
-            self.api_config = {
-                'open_ai_api_key': self.config.get("open_ai_api_key", ""),
-                'open_ai_api_base': self.config.get("open_ai_api_base", "https://api.openai.com/v1"),
-                'model': self.config.get("model", "gpt-3.5-turbo"),
-                'max_token_size': self.config.get("max_token_size", 4000)
-            }
-            
-            # 功能配置
-            self.feature_config = {
-                'enabled': self.config.get("enabled", False),
-                'service': self.config.get("service", ""),
-                'max_file_size': self.config.get("max_file_size", 15000),
-                'group': self.config.get("group", True),
-                'qa_prefix': self.config.get("qa_prefix", "问"),
-                'prompt': self.config.get("prompt", ""),
-                'file_cache_time': self.config.get("file_cache_time", 60),
-                'content_cache_time': self.config.get("content_cache_time", 300)
-            }
-
-            # 将配置直接映射到类属性
-            for key, value in {**self.api_config, **self.feature_config}.items():
-                setattr(self, key, value)
-
-            # 必要的配置检查
-            if not self.open_ai_api_key:
-                logger.error("[filesum] open_ai_api_key not configured")
-                raise Exception("open_ai_api_key not configured")
-                
-            if not self.enabled:
-                logger.info("[filesum] plugin is disabled")
-
-            # 创建两个不同过期时间的缓存
-            self.file_cache = ExpiredDict(self.file_cache_time)      # 文件路径缓存
-            self.content_cache = ExpiredDict(self.content_cache_time) # 文件内容缓存
-
-            logger.info("[filesum] inited.")
+            logger.info("[FileSum] Plugin initialized")
         except Exception as e:
-            logger.warn(f"filesum init failed: {e}")
+            logger.error(f"[FileSum] Init failed: {e}")
+            raise e
+
+    def get_help_text(self, **kwargs):
+        help_text = "📄 文件总结插件使用说明：\n"
+        help_text += "1. 发送文件后，单聊会自动总结\n"
+        help_text += "2. 群聊需要发送「总结」触发总结\n"
+        help_text += f"3. 总结完成后5分钟内可发送「{self.qa_prefix}xxx」追问文件内容\n"
+        help_text += "\n支持格式：PDF、Word、Excel、PPT、TXT、Markdown、HTML、CSV"
+        return help_text
+
+    def _load_config_template(self):
+        try:
+            plugin_config_path = os.path.join(self.path, "config.json.template")
+            if os.path.exists(plugin_config_path):
+                with open(plugin_config_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.error(f"[FileSum] Load config template failed: {e}")
+        return {}
 
     def on_handle_context(self, e_context: EventContext):
         context = e_context["context"]
