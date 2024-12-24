@@ -35,7 +35,7 @@ EXTENSION_TO_TYPE = {
 
 @plugins.register(
     name="FileSum",
-    desire_priority=2,
+    desire_priority=20,
     hidden=False,
     desc="A plugin for summarizing files",
     version="1.0.0",
@@ -64,6 +64,7 @@ class FileSum(Plugin):
             # 初始化缓存
             self.file_cache = ExpiredDict(self.config.get("file_cache_time", 60))
             self.content_cache = ExpiredDict(self.config.get("content_cache_time", 300))
+            self.params_cache = {}
             
             # 注册事件处理器
             self.handlers[Event.ON_HANDLE_CONTEXT] = self.on_handle_context
@@ -95,34 +96,45 @@ class FileSum(Plugin):
         context = e_context["context"]
         msg: ChatMessage = e_context["context"]["msg"]
         
-        # 获取会话ID，如果没有则使用默认值
+        # 修改缓存键的生成方式，并添加更多日志
         chat_id = context.get("session_id", "default")
+        logger.info(f"[FileSum] 原始 chat_id: {chat_id}")
+        
         user_id = msg.from_user_id
+        logger.info(f"[FileSum] 原始 user_id: {user_id}")
+        
+        # 清理ID中的特殊字符
+        chat_id = chat_id.replace('@', '').split('_')[0]
+        user_id = user_id.replace('@', '').split('_')[0]
+        
+        logger.info(f"[FileSum] 处理后 chat_id: {chat_id}")
+        logger.info(f"[FileSum] 处理后 user_id: {user_id}")
+        
         isgroup = e_context["context"].get("isgroup", False)
         
         # 生成缓存key
-        cache_key = f"{chat_id}_{user_id}"
+        cache_key = f"filesum_{chat_id}_{user_id}"
+        logger.info(f"[FileSum] 生成缓存键: {cache_key}")
 
         if isgroup and not self.group:
-            logger.info("[filesum] 群聊消息，文件处理功能已禁用")
+            logger.info("[FileSum] 群聊消息，文件处理功能已禁用")
             return
 
         # 处理文件消息
         if context.type == ContextType.FILE and self.enabled:
-            logger.info("[filesum] 收到文件，存入缓存")
+            logger.info(f"[FileSum] 收到文件，存入缓存，key={cache_key}")
             context.get("msg").prepare()
             file_path = context.content
             
-            # 使用组合key存储文件路径
             self.file_cache[cache_key] = {
                 'file_path': file_path,
                 'processed': False
             }
-            logger.info(f"[filesum] 文件路径已缓存: {file_path}")
+            logger.info(f"[FileSum] 文件路径已缓存: {file_path}")
 
             # 如果是单聊，直接触发总结
             if not isgroup:
-                logger.info("[filesum] 单聊消息，自动触发总结")
+                logger.info("[FileSum] 单聊消息，自动触发总结")
                 return self._process_file_summary(cache_key, e_context)
             return
 
@@ -130,29 +142,36 @@ class FileSum(Plugin):
         if context.type == ContextType.TEXT and self.enabled:
             text = context.content
             
-            # 处理总结请求（仅群聊需要手动触发）
-            if "总结" in text and cache_key in self.file_cache and isgroup:
-                return self._process_file_summary(cache_key, e_context)
+            # 检查是否是追问
+            if text.startswith(self.qa_prefix):
+                logger.info(f"[FileSum] 检测到追问请求: {text}")
+                
+                # 检查缓存状态
+                if cache_key in self.content_cache:
+                    logger.info(f"[FileSum] 找到内容缓存，key={cache_key}")
+                    cache_data = self.content_cache[cache_key]
+                    
+                    if cache_data and 'file_content' in cache_data:
+                        logger.info("[FileSum] 找到有效的文件内容缓存")
+                        question = text[len(self.qa_prefix):].strip()
+                        # 直接处理追问并返回，不再继续
+                        self.handle_question(cache_data['file_content'], question, e_context)
+                        return
+                    
+                logger.info("[FileSum] 没有找到有效的文件内容缓存")
+                return
 
-            # 处理追问
-            elif text.startswith(self.qa_prefix) and cache_key in self.content_cache:
-                cache_data = self.content_cache.get(cache_key)
-                if not cache_data:
-                    logger.info("[filesum] 未找到缓存的文件内容")
-                    reply = Reply(ReplyType.ERROR, "文件内容已过期，请重新发送文件")
-                    e_context["reply"] = reply
-                    return
+            # 群聊中的总结触发命令
+            elif isgroup and text.strip() == "总结":
+                logger.info("[FileSum] 群聊中收到总结命令")
+                if cache_key in self.file_cache:
+                    logger.info(f"[FileSum] 找到文件缓存，开始处理总结")
+                    return self._process_file_summary(cache_key, e_context)
+                else:
+                    logger.info("[FileSum] 未找到待处理的文件，让事件继续传递")
+                    return False  # 返回 False 让事件继续传递给其他插件（如 JinaSum）
 
-                file_content = cache_data.get('file_content')
-                if not file_content:
-                    logger.info("[filesum] 缓存中没有文件内容")
-                    reply = Reply(ReplyType.ERROR, "文件内容已过期，请重新发送文件")
-                    e_context["reply"] = reply
-                    return
-
-                # 处理追问
-                question = text[len(self.qa_prefix):].strip()
-                self.handle_question(file_content, question, e_context)
+        return False
 
     def _process_file_summary(self, cache_key: str, e_context: EventContext):
         """处理文件总结的核心逻辑"""
@@ -170,6 +189,7 @@ class FileSum(Plugin):
             logger.info("[filesum] 缓存的文件不存在")
             reply = Reply(ReplyType.ERROR, "文件已过期，请重新发送")
             e_context["reply"] = reply
+            e_context.action = EventAction.BREAK_PASS
             return
 
         # 读取文件内容
@@ -179,13 +199,26 @@ class FileSum(Plugin):
             logger.info("[filesum] 文件内容无法提取")
             reply = Reply(ReplyType.ERROR, "无法读取文件内容")
             e_context["reply"] = reply
+            e_context.action = EventAction.BREAK_PASS
             return
 
         # 将文件内容存入内容缓存
-        self.content_cache[cache_key] = {
-            'file_content': file_content,
-            'processed': True
-        }
+        try:
+            self.content_cache[cache_key] = {
+                'file_content': file_content,
+                'processed': True
+            }
+            logger.info(f"[FileSum] 文件内容已缓存，cache_key={cache_key}")
+            logger.info(f"[FileSum] 缓存内容长度: {len(file_content)}")
+            
+            # 验证缓存是否成功
+            if cache_key in self.content_cache:
+                logger.info("[FileSum] 验证：缓存写入成功")
+            else:
+                logger.error("[FileSum] 验证：缓存写入失败")
+            
+        except Exception as e:
+            logger.error(f"[FileSum] 缓存文件内容时出错: {str(e)}")
         
         # 处理文件内容
         self.handle_file(file_content, e_context)
@@ -196,6 +229,8 @@ class FileSum(Plugin):
             logger.info(f"[filesum] 文件 {file_path} 已删除")
             # 删除文件路径缓存
             del self.file_cache[cache_key]
+            # 设置事件状态为 BREAK_PASS
+            e_context.action = EventAction.BREAK_PASS
         except Exception as e:
             logger.error(f"[filesum] 删除文件失败: {str(e)}")
 
@@ -337,15 +372,13 @@ class FileSum(Plugin):
                 e_context["reply"] = reply
                 return
 
-            # 使用配置中的token限制
+            # 用置中的token限制
             if len(content) > self.max_token_size:
                 content = content[:self.max_token_size] + "..."
                 logger.warning(f"文件内容已截断到 {self.max_token_size} 个字符")
 
-            user_id = e_context["context"]["msg"].from_user_id
-            prompt = self.prompt
-            if user_id in self.params_cache and 'prompt' in self.params_cache[user_id]:
-                prompt = self.params_cache[user_id]['prompt']
+            # 简化prompt获取逻辑
+            prompt = self.prompt  # 直接使用默认prompt，移除params_cache相关逻辑
 
             # 构建提示词
             messages = [
@@ -383,13 +416,20 @@ class FileSum(Plugin):
     def handle_question(self, content, question, e_context):
         """处理追问"""
         try:
+            logger.info(f"[FileSum] 开始处理追问，问题：{question}")
+            
+            # 先发送等待消息
+            reply = Reply(ReplyType.TEXT, "🤔 正在思考您的问题，请稍候...")
+            channel = e_context["channel"]
+            channel.send(reply, e_context["context"])
+            
             # 构建提示词
             messages = [
                 {"role": "system", "content": "你是一个文件问答助手。请基于给定的文件内容回答问题。"},
                 {"role": "user", "content": f"文件内容如下：\n\n{content}\n\n问题：{question}"}
             ]
 
-            # 调用OpenAI API
+            logger.info("[FileSum] 开始调用 OpenAI API")
             response = requests.post(
                 f"{self.open_ai_api_base}/chat/completions",
                 headers={
@@ -398,23 +438,46 @@ class FileSum(Plugin):
                 },
                 json={
                     "model": self.model,
-                    "messages": messages
-                }
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 1000
+                },
+                timeout=30
             )
 
+            logger.info(f"[FileSum] API 响应状态码: {response.status_code}")
+            
             if response.status_code == 200:
                 result = response.json()
                 answer = result['choices'][0]['message']['content']
+                logger.info(f"[FileSum] 获得回答，长度：{len(answer)}")
+                logger.info(f"[FileSum] 回答内容：{answer}")
+                
+                # 设置回复
                 reply = Reply(ReplyType.TEXT, answer)
+                e_context["reply"] = reply
+                e_context.action = EventAction.BREAK_PASS
+                return
+                
             else:
-                reply = Reply(ReplyType.ERROR, "调用API失败")
+                logger.error(f"[FileSum] API调用失败: {response.text}")
+                reply = Reply(ReplyType.ERROR, "调用API失败，请稍后重试")
+                e_context["reply"] = reply
+                e_context.action = EventAction.BREAK_PASS
+                return
 
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[FileSum] API请求异常: {str(e)}")
+            reply = Reply(ReplyType.ERROR, "网络请求失败，请稍后重试")
             e_context["reply"] = reply
-
+            e_context.action = EventAction.BREAK_PASS
+            return
         except Exception as e:
-            logger.error(f"处理追问时出错: {str(e)}")
-            reply = Reply(ReplyType.ERROR, f"处理追问时出错: {str(e)}")
+            logger.error(f"[FileSum] 处理追问时出错: {str(e)}")
+            reply = Reply(ReplyType.ERROR, "处理问题时出错，请重试")
             e_context["reply"] = reply
+            e_context.action = EventAction.BREAK_PASS
+            return
 
 def remove_markdown(text):
     """移除Markdown格式"""
