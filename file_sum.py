@@ -378,7 +378,7 @@ class FileSum(Plugin):
                 logger.warning(f"文件内容已截断到 {self.max_token_size} 个字符")
 
             # 简化prompt获取逻辑
-            prompt = self.prompt  # 直接使用默认prompt，移除params_cache相关逻辑
+            prompt = self.prompt  # 直接使用默认prompt，移除params_cache相关逻��
 
             # 构建提示词
             messages = [
