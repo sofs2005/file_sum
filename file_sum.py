@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from pptx import Presentation
 from openpyxl import load_workbook
 import fitz  # PyMuPDF
+import subprocess
 
 # 文件扩展名到类型的映射
 EXTENSION_TO_TYPE = {
@@ -154,7 +155,7 @@ class FileSum(Plugin):
                 return
 
             # 群聊中的总结触发命令
-            elif isgroup and text.strip() == "总结":
+            elif isgroup and "总结" in text:
                 logger.info("[FileSum] 群聊中收到总结命令")
                 if cache_key in self.file_cache:
                     logger.info(f"[FileSum] 找到文件缓存，开始处理总结")
@@ -268,9 +269,39 @@ class FileSum(Plugin):
     def read_docx(self, file_path):
         """读取Word文档"""
         try:
-            doc = Document(file_path)
-            content = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
-            return content
+            # 检查文件扩展名
+            ext = os.path.splitext(file_path)[1].lower()
+            
+            if ext == '.docx':
+                # 处理 .docx 文件
+                doc = Document(file_path)
+                content = '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+                return content
+            elif ext == '.doc':
+                # 处理 .doc 文件，使用系统 antiword 命令
+                try:
+                    # 使用绝对路径
+                    antiword_path = '/usr/bin/antiword'
+                    if not os.path.exists(antiword_path):
+                        logger.error("未找到 antiword，请先安装: sudo apt-get install antiword")
+                        return None
+                        
+                    result = subprocess.run([antiword_path, file_path], 
+                                         capture_output=True, 
+                                         text=True,
+                                         encoding='utf-8')
+                    if result.returncode == 0:
+                        return result.stdout
+                    else:
+                        logger.error(f"antiword 处理失败: {result.stderr}")
+                        return None
+                except Exception as e:
+                    logger.error(f"使用 antiword 处理文件失败: {str(e)}")
+                    return None
+            else:
+                logger.error(f"不支持的Word文件格式: {ext}")
+                return None
+            
         except Exception as e:
             logger.error(f"读取Word文档失败: {str(e)}")
             return None
