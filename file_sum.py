@@ -5,9 +5,10 @@ import csv
 import re
 import requests
 import plugins
-from bridge.context import ContextType, EventContext
+from bridge.context import ContextType
 from bridge.reply import Reply, ReplyType
 from common.log import logger
+from common.expired_dict import ExpiredDict
 from plugins import *
 from docx import Document
 from bs4 import BeautifulSoup
