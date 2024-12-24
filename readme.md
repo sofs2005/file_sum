@@ -19,11 +19,24 @@
 - 支持自定义提示词
 
 ## 安装
-使用管理员口令在线安装，管理员认证方法见：[管理员认证](https://github.com/hanfangyuan4396/dify-on-wechat/tree/master/plugins/godcmd)
+1. 使用管理员口令在线安装，管理员认证方法见：[管理员认证](https://github.com/hanfangyuan4396/dify-on-wechat/tree/master/plugins/godcmd)
 ```bash
 #installp https://github.com/sofs2005/file_sum.git
 ```
-安装成功后，根据提示使用`#scanp` 命令来扫描新插件
+
+2. 安装系统依赖（Linux系统需要）：
+```bash
+# Debian/Ubuntu
+sudo apt-get install antiword
+
+# CentOS/RHEL
+sudo yum install antiword
+
+# macOS
+brew install antiword
+```
+
+3. 安装成功后，根据提示使用`#scanp` 命令来扫描新插件
 
 ## 配置
 复制插件目录的`config.json.template`文件，重命名为`config.json`，配置参数即可。
