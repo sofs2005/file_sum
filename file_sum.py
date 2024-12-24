@@ -402,6 +402,8 @@ class FileSum(Plugin):
             if response.status_code == 200:
                 result = response.json()
                 summary = result['choices'][0]['message']['content']
+                # 添加追问提示
+                summary += f"\n\n💡 您可以在5分钟内发送「{self.qa_prefix}xxx」来询问文件相关问题"
                 reply = Reply(ReplyType.TEXT, summary)
             else:
                 reply = Reply(ReplyType.ERROR, "调用API失败")
