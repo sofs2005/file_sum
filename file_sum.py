@@ -39,7 +39,7 @@ EXTENSION_TO_TYPE = {
     desire_priority=20,
     hidden=False,
     desc="A plugin for summarizing files",
-    version="1.0.0",
+    version="1.0.1",
     author="sofs2005",
 )
 class FileSum(Plugin):
@@ -333,12 +333,33 @@ class FileSum(Plugin):
     def read_excel(self, file_path):
         """读取Excel文件"""
         try:
-            wb = load_workbook(file_path)
-            content = []
-            for sheet in wb.worksheets:
-                for row in sheet.iter_rows(values_only=True):
-                    content.append('\t'.join([str(cell) if cell is not None else '' for cell in row]))
-            return '\n'.join(content)
+            ext = os.path.splitext(file_path)[1].lower()
+            
+            if ext == '.xlsx':
+                # 处理 .xlsx 文件
+                wb = load_workbook(file_path)
+                content = []
+                for sheet in wb.worksheets:
+                    for row in sheet.iter_rows(values_only=True):
+                        content.append('\t'.join([str(cell) if cell is not None else '' for cell in row]))
+                return '\n'.join(content)
+            elif ext == '.xls':
+                # 处理 .xls 文件
+                try:
+                    import xlrd
+                    wb = xlrd.open_workbook(file_path)
+                    content = []
+                    for sheet in wb.sheets():
+                        for row in range(sheet.nrows):
+                            row_values = [str(cell.value) if cell.value is not None else '' for cell in sheet.row(row)]
+                            content.append('\t'.join(row_values))
+                    return '\n'.join(content)
+                except ImportError:
+                    logger.error("未安装 xlrd 库，无法读取 .xls 文件。请安装：pip install xlrd")
+                    return None
+            else:
+                logger.error(f"不支持的Excel文件格式: {ext}")
+                return None
         except Exception as e:
             logger.error(f"读取Excel文件失败: {str(e)}")
             return None
@@ -369,13 +390,23 @@ class FileSum(Plugin):
     def read_ppt(self, file_path):
         """读取PPT文件"""
         try:
-            prs = Presentation(file_path)
-            content = []
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        content.append(shape.text)
-            return '\n'.join(content)
+            ext = os.path.splitext(file_path)[1].lower()
+            
+            if ext == '.pptx':
+                # 处理 .pptx 文件
+                prs = Presentation(file_path)
+                content = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            content.append(shape.text)
+                return '\n'.join(content)
+            elif ext == '.ppt':
+                logger.error("不支持旧版 .ppt 格式，请转换为 .pptx 后重试")
+                return None
+            else:
+                logger.error(f"不支持的PPT文件格式: {ext}")
+                return None
         except Exception as e:
             logger.error(f"读取PPT文件失败: {str(e)}")
             return None

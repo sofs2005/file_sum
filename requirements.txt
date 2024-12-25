@@ -1,5 +1,6 @@
 python-docx
 PyMuPDF
 openpyxl
+xlrd
 beautifulsoup4
 python-pptx

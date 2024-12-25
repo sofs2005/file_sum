@@ -12,7 +12,7 @@
   - Excel表格 (.xls, .xlsx)
   - CSV文件 (.csv)
   - HTML文件 (.html, .htm)
-  - PPT文件 (.ppt, .pptx)
+  - PPT文件 (.pptx)
 - 手动触发总结，避免无用调用
 - 支持文件内容追问，加深理解
 - 支持群聊和私聊场景
