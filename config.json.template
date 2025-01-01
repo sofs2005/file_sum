@@ -1,14 +1,9 @@
 {
-  "open_ai_api_key": "your-key",
-  "open_ai_api_base": "https://api.openai.com/v1",
-  "model": "gpt-3.5-turbo",
   "enabled": true,
-  "service": "openai",
   "max_file_size": 15000,
   "max_token_size": 4000,
   "group": true,
   "qa_prefix": "问",
   "prompt": "请总结这个文件的主要内容",
-  "file_cache_time": 60,
-  "content_cache_time": 300
+  "file_cache_time": 300
 }
