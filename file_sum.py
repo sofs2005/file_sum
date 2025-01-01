@@ -205,25 +205,35 @@ class FileSum(Plugin):
             file_extension = os.path.splitext(file_path)[1].lower().replace('.', '')
             file_type = EXTENSION_TO_TYPE.get(file_extension)
             
-            if file_type == 'pdf':
-                return self.read_pdf(file_path)
-            elif file_type == 'docx':
-                return self.read_docx(file_path)
-            elif file_type == 'md':
-                return self.read_markdown(file_path)
-            elif file_type == 'txt':
-                return self.read_txt(file_path)
-            elif file_type == 'excel':
-                return self.read_excel(file_path)
-            elif file_type == 'csv':
-                return self.read_csv(file_path)
-            elif file_type == 'html':
-                return self.read_html(file_path)
-            elif file_type == 'ppt':
-                return self.read_ppt(file_path)
+            if file_type:
+                # 如果是支持的文件类型，使用专门的处理方法
+                if file_type == 'pdf':
+                    return self.read_pdf(file_path)
+                elif file_type == 'docx':
+                    return self.read_docx(file_path)
+                elif file_type == 'md':
+                    return self.read_markdown(file_path)
+                elif file_type == 'txt':
+                    return self.read_txt(file_path)
+                elif file_type == 'excel':
+                    return self.read_excel(file_path)
+                elif file_type == 'csv':
+                    return self.read_csv(file_path)
+                elif file_type == 'html':
+                    return self.read_html(file_path)
+                elif file_type == 'ppt':
+                    return self.read_ppt(file_path)
             else:
-                logger.error(f"不支持的文件类型: {file_extension}")
-                return None
+                # 对于未知类型的文件，尝试以文本方式读取
+                logger.info(f"尝试以文本方式读取未知类型文件: {file_extension}")
+                content = self.read_txt(file_path)  # 已经包含了编码检测功能
+                if content:
+                    logger.info(f"成功以文本方式读取文件: {file_extension}")
+                    return content
+                else:
+                    logger.error(f"不支持的文件类型: {file_extension}")
+                    return None
+                
         except Exception as e:
             logger.error(f"提取文件内容时出错: {str(e)}")
             return None
@@ -290,17 +300,42 @@ class FileSum(Plugin):
             return None
 
     def read_txt(self, file_path):
-        """读取文本文件"""
-        encodings = ['utf-8', 'gbk', 'gb2312', 'ascii']
+        """读取文本文件，支持多种编码"""
+        encodings = ['utf-8', 'gbk', 'gb2312', 'big5', 'ascii', 'latin1']
+        content = None
+        
+        # 先尝试用 chardet 检测编码
+        try:
+            import chardet
+            with open(file_path, 'rb') as f:
+                raw_data = f.read()
+                detected = chardet.detect(raw_data)
+                if detected['confidence'] > 0.7:  # 只有当置信度较高时才使用检测结果
+                    try:
+                        content = raw_data.decode(detected['encoding'])
+                        logger.info(f"[filesum] 使用检测到的编码 {detected['encoding']} 成功读取文件")
+                        return content
+                    except Exception as e:
+                        logger.debug(f"[filesum] 使用检测到的编码 {detected['encoding']} 读取失败: {str(e)}")
+        except ImportError:
+            logger.debug("[filesum] chardet 模块未安装，将使用预定义编码列表")
+        except Exception as e:
+            logger.debug(f"[filesum] 编码检测失败: {str(e)}")
+
+        # 如果编码检测失败或 chardet 不可用，则尝试预定义的编码列表
         for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as f:
-                    return f.read()
+                    content = f.read()
+                    logger.info(f"[filesum] 使用 {encoding} 编码成功读取文件")
+                    return content
             except UnicodeDecodeError:
                 continue
             except Exception as e:
-                logger.error(f"读取文本文件失败: {str(e)}")
-                return None
+                logger.debug(f"[filesum] 使用 {encoding} 读取失败: {str(e)}")
+                continue
+
+        logger.error("[filesum] 所有编码尝试均失败")
         return None
 
     def read_excel(self, file_path):
@@ -338,16 +373,23 @@ class FileSum(Plugin):
             return None
 
     def read_csv(self, file_path):
-        """读取CSV文件"""
+        """读取CSV文件，支持多种编码"""
+        content = self.read_txt(file_path)  # 复用 read_txt 的编码检测功能
+        if content is None:
+            return None
+        
         try:
-            content = []
-            with open(file_path, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    content.append('\t'.join(row))
-            return '\n'.join(content)
+            # 将文本内容转换为CSV格式
+            import io
+            import csv
+            result = []
+            f = io.StringIO(content)
+            reader = csv.reader(f)
+            for row in reader:
+                result.append('\t'.join(row))
+            return '\n'.join(result)
         except Exception as e:
-            logger.error(f"读取CSV文件失败: {str(e)}")
+            logger.error(f"[filesum] CSV解析失败: {str(e)}")
             return None
 
     def read_html(self, file_path):
