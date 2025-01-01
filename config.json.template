@@ -1,9 +1,7 @@
 {
-  "enabled": true,
-  "max_file_size": 15000,
-  "max_token_size": 4000,
-  "group": true,
-  "qa_prefix": "问",
-  "prompt": "请总结这个文件的主要内容",
-  "file_cache_time": 300
+  "max_file_size": 15000,     // 支持的最大文件大小（KB）
+  "max_token_size": 4000,     // 文本处理的最大字符数
+  "group": true,              // 是否在群聊中启用文件总结功能
+  "prompt": "请总结这个文件的主要内容",  // 总结提示词
+  "file_cache_time": 300      // 文件缓存过期时间（秒）
 }

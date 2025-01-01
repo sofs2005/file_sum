@@ -52,14 +52,12 @@ class FileSum(Plugin):
                 self.config = self._load_config_template()
             
             # 初始化配置
-            self.enabled = self.config.get("enabled", True)
             self.max_file_size = self.config.get("max_file_size", 15000)
             self.max_token_size = self.config.get("max_token_size", 4000)
             self.group = self.config.get("group", True)
-            self.qa_prefix = self.config.get("qa_prefix", "问")
             self.prompt = self.config.get("prompt", "请总结这个文件的主要内容")
             
-            # 初始化缓存，设置为300秒（5分钟）
+            # 初始化缓存
             self.file_cache = ExpiredDict(self.config.get("file_cache_time", 300))
             
             # 注册事件处理器
@@ -74,7 +72,6 @@ class FileSum(Plugin):
         help_text = "📄 文件总结插件使用说明：\n"
         help_text += "1. 发送文件后，单聊会自动总结\n"
         help_text += "2. 群聊需要发送「总结」触发总结\n"
-        help_text += f"3. 总结完成后5分钟内可发送「{self.qa_prefix}xxx」追问文件内容\n"
         help_text += "\n支持格式：PDF、Word、Excel、PPT、TXT、Markdown、HTML、CSV"
         return help_text
 
@@ -110,7 +107,7 @@ class FileSum(Plugin):
             return
 
         # 处理文件消息
-        if context.type == ContextType.FILE and self.enabled:
+        if context.type == ContextType.FILE:
             logger.info(f"[FileSum] 收到文件，存入缓存，key={cache_key}")
             context.get("msg").prepare()
             file_path = context.content
@@ -127,7 +124,7 @@ class FileSum(Plugin):
             return
 
         # 处理文本消息
-        if context.type == ContextType.TEXT and self.enabled:
+        if context.type == ContextType.TEXT:
             text = context.content
             
             # 群聊中的总结触发命令
@@ -400,8 +397,8 @@ class FileSum(Plugin):
                 content = content[:self.max_token_size] + "..."
                 logger.warning(f"文件内容已截断到 {self.max_token_size} 个字符")
 
-            # 构建提示词
-            prompt = f"{self.prompt}\n\n{content}\n\n💡 您可以在5分钟内发送「{self.qa_prefix}xxx」来询问文件相关问题"
+            # 构建提示词，移除追问相关的提示
+            prompt = f"{self.prompt}\n\n{content}"
             
             # 设置用户消息
             e_context["context"].type = ContextType.TEXT
@@ -409,28 +406,11 @@ class FileSum(Plugin):
             
             # 让事件继续传递给 bot 处理
             e_context.action = EventAction.CONTINUE
+            return True
 
         except Exception as e:
             logger.error(f"处理文件内容时出错: {str(e)}")
             reply = Reply(ReplyType.ERROR, f"处理文件时出错: {str(e)}")
-            e_context["reply"] = reply
-            e_context.action = EventAction.BREAK_PASS
-
-    def handle_question(self, question, e_context):
-        """处理追问"""
-        try:
-            logger.info(f"[FileSum] 开始处理追问，问题：{question}")
-            
-            # 直接将问题传递给 bot
-            e_context["context"].type = ContextType.TEXT
-            e_context["context"].content = question
-            
-            # 让事件继续传递给 bot 处理
-            e_context.action = EventAction.CONTINUE
-
-        except Exception as e:
-            logger.error(f"[FileSum] 处理追问时出错: {str(e)}")
-            reply = Reply(ReplyType.ERROR, "处理问题时出错，请重试")
             e_context["reply"] = reply
             e_context.action = EventAction.BREAK_PASS
 
